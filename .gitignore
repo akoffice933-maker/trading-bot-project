@@ -1,0 +1,51 @@
+# Логи
+*.log
+logs/
+
+# Бэкапы и резервные копии
+*.backup
+*.backup2
+*.backup3
+*.backup4
+*.bak
+*.old
+
+# Секреты и конфигурация
+.env
+.env.local
+.env.*.local
+secrets/
+data/
+backups/
+
+# Ключи шифрования
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Временные файлы
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Docker (опционально)
+docker-compose.override.yml
+
+# Тестовые данные
+test_*.py
+test_*.sh
