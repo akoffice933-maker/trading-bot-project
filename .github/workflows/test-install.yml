@@ -1,0 +1,122 @@
+name: Test Installation on Ubuntu
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  test-install:
+    name: Test Install on Ubuntu ${{ matrix.ubuntu-version }}
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu-version: ['22.04', '24.04']
+    
+    # GitHub Actions runner уже имеет Docker
+    runs-on: ubuntu-${{ matrix.ubuntu-version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Docker
+        uses: docker-practice/actions-setup-docker@v1
+        with:
+          docker_version: '24.0'
+      
+      - name: Verify Docker is running
+        run: |
+          docker --version
+          docker compose version
+      
+      - name: Make install script executable
+        run: |
+          chmod +x install-trading-bot-v5.1.sh
+          chmod +x fix-trading-bot.sh
+      
+      - name: Run install script (non-interactive mode)
+        run: |
+          # Создаём тестовый .env для неинтерактивной установки
+          cat > .env << 'EOF'
+          # Test Configuration
+          DOMAIN=test-trading.local
+          EMAIL=test@example.com
+          N8N_PASSWORD=TestPassword123!
+          TELEGRAM_BOT_TOKEN=1234567890:TestToken
+          OPENAI_API_KEY=sk-test1234567890
+          NOTION_API_KEY=test_notion_key
+          MASTER_KEY=TestMasterKey123!
+          EOF
+          
+          # Запускаем установку с флагом автоматического принятия
+          sudo ./install-trading-bot-v5.1.sh --auto-accept || true
+      
+      - name: Check container status
+        run: |
+          cd /opt/n8n-bot || exit 1
+          docker compose ps
+      
+      - name: Verify n8n container is running
+        run: |
+          cd /opt/n8n-bot || exit 1
+          docker compose ps n8n | grep -q "running" || exit 1
+      
+      - name: Verify PostgreSQL container is running
+        run: |
+          cd /opt/n8n-bot || exit 1
+          docker compose ps postgres | grep -q "running" || exit 1
+      
+      - name: Verify Traefik container is running
+        run: |
+          cd /opt/n8n-bot || exit 1
+          docker compose ps traefik | grep -q "running" || exit 1
+      
+      - name: Check n8n health endpoint
+        run: |
+          # Ждём пока n8n запустится (до 60 секунд)
+          for i in {1..12}; do
+            if curl -s http://localhost:5678/healthz > /dev/null 2>&1; then
+              echo "✅ n8n is healthy"
+              exit 0
+            fi
+            echo "Waiting for n8n to start... ($i/12)"
+            sleep 5
+          done
+          echo "❌ n8n failed to start"
+          exit 1
+      
+      - name: Check logs for errors
+        run: |
+          cd /opt/n8n-bot || exit 1
+          docker compose logs n8n --tail=50 | grep -i "error\|fatal\|critical" && exit 1 || true
+      
+      - name: Test trading-bot CLI
+        run: |
+          if [ -f /usr/local/bin/trading-bot ]; then
+            /usr/local/bin/trading-bot --help
+            /usr/local/bin/trading-bot status
+          else
+            echo "⚠️ trading-bot CLI not found (optional)"
+          fi
+      
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installation-logs-ubuntu-${{ matrix.ubuntu-version }}
+          path: |
+            /opt/n8n-bot/docker-compose.yml
+            /opt/n8n-bot/.env
+          retention-days: 7
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          cd /opt/n8n-bot || true
+          docker compose down || true
+          sudo rm -rf /opt/n8n-bot || true

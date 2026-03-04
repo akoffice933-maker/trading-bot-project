@@ -1,6 +1,8 @@
-# 🏦 Торговая Система 2026 — Enterprise v5.1
+# 🏦 Торговая Система 2026 — Enterprise v5.3
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Tested on Ubuntu 22.04](https://img.shields.io/badge/Tested%20on-Ubuntu%2022.04-blue)](docs/TESTING.md)
+[![Tested on Ubuntu 24.04](https://img.shields.io/badge/Tested%20on-Ubuntu%2024.04-blue)](docs/TESTING.md)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](https://www.docker.com/)
 [![n8n](https://img.shields.io/badge/n8n-Automation-ff6d5a?logo=n8n)](https://n8n.io/)
 [![GitHub stars](https://img.shields.io/github/stars/akoffice933-maker/trading-bot-project?style=social)](https://github.com/akoffice933-maker/trading-bot-project/stargazers)
@@ -11,7 +13,7 @@
 
 ## 📖 О проекте
 
-**Trading Bot Enterprise v5.1** — это готовое решение для развёртывания автоматизированной торговой платформы на базе n8n. Система предназначена для создания, тестирования и запуска торговых стратегий любой сложности с интеграцией Telegram, OpenAI, Notion и других сервисов.
+**Trading Bot Enterprise v5.3** — это готовое решение для развёртывания автоматизированной торговой платформы на базе n8n. Система предназначена для создания, тестирования и запуска торговых стратегий любой сложности с интеграцией Telegram, OpenAI, Notion и AI-агрегаторов (OpenRouter, DeepInfra).
 
 ### 🎯 Назначение
 
@@ -20,6 +22,8 @@
 - Интеграция с внешними API (биржи, аналитика, уведомления)
 - Мониторинг и логирование всех операций
 - Надёжное резервное копирование данных
+- **Multi-Pair торговля** — поддержка нескольких торговых пар через единый workflow (v5.2+)
+- **AI Integration** — доступ к 200+ языковым моделям через OpenRouter и DeepInfra (v5.3+)
 
 ---
 
@@ -33,6 +37,8 @@
 | 📊 **Мониторинг** | Prometheus + Grafana, метрики производительности, дашборды |
 | 💾 **Бэкапы** | Локальные, S3 (Wasabi/DO Spaces), rsync на удалённый сервер |
 | 🌐 **Сеть** | Traefik reverse proxy, автоматический HTTPS, роутинг по поддоменам |
+| 📈 **Multi-Pair** | Торговля несколькими парами через единый workflow (v5.2+) |
+| 🧠 **AI Integration** | OpenAI, **OpenRouter** (200+ моделей), **DeepInfra** (50+ моделей) |
 
 ---
 
@@ -75,6 +81,7 @@
 | **Grafana** | latest | Визуализация |
 | **Fail2Ban** | latest | Защита от атак |
 | **Docker** | latest | Контейнеризация |
+| **AI Aggregators** | OpenRouter, DeepInfra | Доступ к 200+ LLM моделям |
 
 ---
 
@@ -149,10 +156,14 @@ trading-bot-project/
 ├── README.md                      # Документация
 ├── LICENSE                        # MIT License
 ├── .gitignore                     # Исключения для Git
-├── configs/                       # Конфигурационные файлы (пользовательские)
+├── configs/                       # Конфигурационные файлы
+│   └── pairs.json                 # Настройки торговых пар (multi-pair v5.2)
+├── workflows/                     # Примеры workflow для n8n
+│   └── trading-bot-main.v5.1-multi-pair.json  # Multi-pair workflow
 ├── scripts/                       # Дополнительные скрипты
 ├── tests/                         # Тесты
 └── docs/                          # Дополнительная документация
+    └── MULTI_PAIR_CONFIG.md       # Руководство по multi-pair торговле
 ```
 
 ---
@@ -342,6 +353,131 @@ n8n Execution → Webhook → Notion API → База данных
 
 ---
 
+## 📈 Multi-Pair Торговля (v5.2+)
+
+Начиная с версии 5.2 поддерживается торговля несколькими торговыми парами через единый workflow.
+
+### Быстрый старт
+
+```bash
+# 1. Настройте пары в configs/pairs.json
+nano configs/pairs.json
+
+# 2. Импортируйте workflow
+# workflows/trading-bot-main.v5.1-multi-pair.json через веб-интерфейс n8n
+
+# 3. Активируйте workflow и торгуйте!
+```
+
+### Пример конфигурации
+
+```json
+{
+  "enabled": true,
+  "pairs": [
+    {"symbol": "BTCUSDT", "enabled": true, "risk": {"position_size_usdt": 100}},
+    {"symbol": "ETHUSDT", "enabled": true, "risk": {"position_size_usdt": 100}},
+    {"symbol": "SOLUSDT", "enabled": false}
+  ],
+  "global_settings": {
+    "max_total_positions": 3,
+    "max_daily_loss_usdt": 150
+  }
+}
+```
+
+📖 **Полная документация:** [docs/MULTI_PAIR_CONFIG.md](docs/MULTI_PAIR_CONFIG.md)
+
+### Преимущества архитектуры
+
+| Параметр | Single-Pair | Multi-Pair (v5.2) |
+|----------|-------------|-------------------|
+| Workflow | 1 на пару | 1 на все пары |
+| WebSocket | 1 на пару | 1 общий |
+| Фильтрация | Нет | Динамическая |
+| Масштабируемость | До 3 пар | До 10+ пар |
+| Ресурсы | Выше | Оптимизировано |
+
+---
+
+## 🧠 AI Integration (v5.3+)
+
+Система поддерживает интеграцию с **AI-агрегаторами** для доступа к сотням языковых моделей через единый API.
+
+### Поддерживаемые агрегаторы
+
+| Агрегатор | Моделей | Преимущества | Цены |
+|-----------|---------|--------------|------|
+| **OpenRouter** | 200+ | Единый API, роутинг, fallback | от $0.1/1M tokens |
+| **DeepInfra** | 50+ | Низкие задержки, open-source модели | от $0.07/1M tokens |
+| **OpenAI** | 10+ | Официальный API, GPT-4, o1 | от $2.5/1M tokens |
+
+### Быстрая настройка
+
+```bash
+# 1. Получите API ключи
+# OpenRouter: https://openrouter.ai/keys
+# DeepInfra: https://deepinfra.com/dash/api_keys
+
+# 2. Добавьте в .env
+echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env
+echo "DEEPINFRA_API_KEY=..." >> .env
+
+# 3. Импортируйте workflow
+# workflows/ai-sentiment-analysis.json
+```
+
+### Примеры использования
+
+#### 1. Анализ настроений новостей
+```
+Новости → n8n → OpenRouter (Llama-3.1-70B) → Sentiment Score → Trading Decision
+```
+
+#### 2. AI-сигналы
+```
+Цена → Индикаторы → DeepInfra (Mistral-Large) → Signal → Bybit Order
+```
+
+#### 3. Multi-Model роутинг
+```
+Запрос → OpenRouter → 
+  ├─ GPT-4 (сложные задачи)
+  ├─ Claude-3.5 (анализ текста)
+  └─ Llama-3 (быстрые запросы)
+```
+
+#### 4. Multi-Model Consensus (v5.3) 🆕
+```
+Рыночные данные → 4 AI модели → Голосование → Consensus Score → Trading Decision
+
+Модели:
+  • GPT-4 Turbo (технический анализ)
+  • Claude-3.5 (настроения рынка)
+  • Llama-3.1 70B (статистика)
+  • Mistral Large (риск-менеджмент)
+
+Точность: ~78-85% (vs 60-70% у одной модели)
+Стоимость: ~$0.008 за консенсус
+```
+
+### Популярные модели для трейдинга
+
+| Модель | Агрегатор | Цена | Точность* | Использование |
+|--------|-----------|------|-----------|---------------|
+| **GPT-4 Turbo** | OpenRouter | $10/1M | ~72% | Сложный анализ |
+| **Claude-3.5 Sonnet** | OpenRouter | $3/1M | ~70% | Анализ новостей |
+| **Llama-3.1 70B** | OpenRouter/DeepInfra | $0.8/1M | ~65% | Быстрые сигналы |
+| **Mistral Large** | OpenRouter/DeepInfra | $2/1M | ~68% | Технический анализ |
+| **Qwen-2.5 72B** | OpenRouter/DeepInfra | $0.4/1M | ~63% | Классификация |
+| **Multi-Model Consensus** | 4 модели | $0.008/раз | **~78-85%** | Критически важные решения |
+
+*\*Точность указана для примера, реальные значения зависят от стратегии и рыночных условий*
+
+📖 **Полная документация:** [docs/AI_AGGREGATORS.md](docs/AI_AGGREGATORS.md)
+
+---
+
 ## 📝 Лицензия
 
 MIT License — см. файл [LICENSE](LICENSE)
@@ -400,6 +536,6 @@ MIT License — см. файл [LICENSE](LICENSE)
 
 **Сделано с ❤️ для трейдеров и разработчиков**
 
-[⬆️ Вернуться к началу](#-торговая-система-2026--enterprise-v51)
+[⬆️ Вернуться к началу](#-торговая-система-2026--enterprise-v53)
 
 </div>

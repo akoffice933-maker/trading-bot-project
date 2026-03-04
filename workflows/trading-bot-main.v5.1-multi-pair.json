@@ -1,0 +1,170 @@
+{
+  "name": "Trading Bot v5.1 - Multi-Pair",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "websocket-trigger",
+      "name": "Bybit WebSocket",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "bybit-stream",
+      "notes": "Подписывается на stream всех торговых пар"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === MULTI-PAIR FILTER ===\n// Загружаем конфигурацию пар\nconst pairsConfig = $input.item.json;\n\n// Получаем активные пары из pairs.json\nconst activePairs = pairsConfig.pairs\n  .filter(pair => pair.enabled)\n  .map(pair => pair.symbol);\n\n// Извлекаем символ из сообщения Bybit\nconst message = pairsConfig;\nconst symbol = message.symbol || message.data?.symbol || '';\n\n// Проверяем, есть ли пара в активном списке\nconst isActive = activePairs.includes(symbol);\n\nif (!isActive) {\n  // Игнорируем неактивные пары\n  return [];\n}\n\n// Находим настройки для этой пары\nconst pairSettings = pairsConfig.pairs.find(p => p.symbol === symbol);\n\n// Добавляем настройки в сообщение для downstream нод\nreturn {\n  json: {\n    ...message,\n    _pairSettings: pairSettings,\n    _symbol: symbol,\n    _timestamp: new Date().toISOString()\n  }\n};"
+        },
+        "id": "function-filter",
+        "name": "Filter by Symbol",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [450, 300],
+        "notes": "Фильтрует сообщения по активным парам из pairs.json"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === TRADING CONDITIONS ===\nconst item = $input.item.json;\nconst settings = item._pairSettings;\nconst data = item.data || item;\n\n// Пример: проверка объема\nconst volume24h = data.volume_24h || 0;\nconst minVolume = settings.filters.min_volume_24h || 0;\n\nif (volume24h < minVolume) {\n  return []; // Недостаточный объем\n}\n\n// Пример: проверка волатильности\nconst volatility = data.price_change_pct_24h || 0;\nconst maxVolatility = settings.filters.volatility_max_pct || 100;\n\nif (Math.abs(volatility) > maxVolatility) {\n  return []; // Слишком высокая волатильность\n}\n\n// Проверяем лимит дневных trades\nconst dailyTrades = item._dailyTrades || 0;\nconst maxDaily = settings.risk.max_daily_trades || 999;\n\nif (dailyTrades >= maxDaily) {\n  return []; // Достигнут дневной лимит\n}\n\n// Все условия выполнены — передаем дальше\nreturn {\n  json: {\n    ...item,\n    _conditionsPassed: true,\n    _validatedAt: new Date().toISOString()\n  }\n};"
+        },
+        "id": "function-conditions",
+        "name": "Check Trading Conditions",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [650, 300],
+        "notes": "Проверяет объем, волатильность и дневные лимиты"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === SIGNAL GENERATION ===\nconst item = $input.item.json;\nconst settings = item._pairSettings;\nconst symbol = item._symbol;\n\n// Пример простой логики сигналов (замените на свою стратегию)\nconst price = item.price || item.last_price || 0;\nconst ma20 = item.ma20 || 0;\nconst ma50 = item.ma50 || 0;\n\nlet signal = 'HOLD';\nlet direction = 'NONE';\n\n// Золотой крест (бычий сигнал)\nif (ma20 > ma50 && price > ma20) {\n  signal = 'BUY';\n  direction = 'LONG';\n}\n\n// Медвежий крест\nif (ma20 < ma50 && price < ma20) {\n  signal = 'SELL';\n  direction = 'SHORT';\n}\n\nif (signal === 'HOLD') {\n  return [];\n}\n\n// Рассчитываем размеры позиции\nconst risk = settings.risk;\nconst stopLossPrice = direction === 'LONG' \n  ? price * (1 - risk.stop_loss_pct / 100)\n  : price * (1 + risk.stop_loss_pct / 100);\n\nconst takeProfitPrice = direction === 'LONG'\n  ? price * (1 + risk.take_profit_pct / 100)\n  : price * (1 - risk.take_profit_pct / 100);\n\nreturn {\n  json: {\n    ...item,\n    _signal: signal,\n    _direction: direction,\n    _entryPrice: price,\n    _stopLoss: stopLossPrice,\n    _takeProfit: takeProfitPrice,\n    _positionSizeUsdt: risk.position_size_usdt,\n    _generatedAt: new Date().toISOString()\n  }\n};"
+        },
+        "id": "function-signal",
+        "name": "Generate Signal",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [850, 300],
+        "notes": "Генерирует торговый сигнал на основе стратегии"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._direction === 'LONG' ? 'https://api.bybit.com/v5/order/create' : 'https://api.bybit.com/v5/order/create' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "bybitApi",
+        "body": {
+          "category": "linear",
+          "symbol": "={{ $json._symbol }}",
+          "side": "={{ $json._direction === 'LONG' ? 'Buy' : 'Sell' }}",
+          "orderType": "Market",
+          "qty": "={{ ($json._positionSizeUsdt / $json._entryPrice).toFixed(3) }}",
+          "tpslMode": "Full",
+          "takeProfit": "={{ $json._takeProfit.toFixed(2) }}",
+          "stopLoss": "={{ $json._stopLoss.toFixed(2) }}"
+        }
+      },
+      "id": "http-execute",
+      "name": "Execute Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 300],
+      "notes": "Открывает позицию с TP/SL"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot{{ $credentials.telegramBot.token }}/sendMessage",
+        "body": {
+          "chat_id": "={{ $credentials.telegramChatId }}",
+          "text": "={{ `🚀 ${$json._symbol} | ${$json._direction}\\n\\n📊 Entry: ${$json._entryPrice}\\n🛑 SL: ${$json._stopLoss}\\n🎯 TP: ${$json._takeProfit}\\n💰 Size: ${$json._positionSizeUsdt} USDT\\n\\n✅ Ордер исполнен!` }}",
+          "parse_mode": "markdown"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.3,
+      "position": [1250, 300],
+      "notes": "Уведомление об исполнении ордера"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Bybit WebSocket": {
+      "main": [
+        [
+          {
+            "node": "Filter by Symbol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter by Symbol": {
+      "main": [
+        [
+          {
+            "node": "Check Trading Conditions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Trading Conditions": {
+      "main": [
+        [
+          {
+            "node": "Generate Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Signal": {
+      "main": [
+        [
+          {
+            "node": "Execute Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Order": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "UTC"
+  },
+  "versionId": "multi-pair-v5.1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "multi-pair-template"
+  },
+  "tags": [
+    {
+      "name": "multi-pair",
+      "createdAt": "2026-03-04T00:00:00.000Z"
+    },
+    {
+      "name": "bybit",
+      "createdAt": "2026-03-04T00:00:00.000Z"
+    }
+  ]
+}

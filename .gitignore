@@ -49,3 +49,12 @@ docker-compose.override.yml
 # Тестовые данные
 test_*.py
 test_*.sh
+
+# Workflow (личные данные)
+workflows/*.json
+!workflows/*.example.json
+!workflows/*-multi-pair.json
+
+# Credentials n8n
+workflows/credentials/
+*.credentials.json

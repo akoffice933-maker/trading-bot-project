@@ -1,0 +1,152 @@
+name: Validate Configuration Files
+
+on:
+  push:
+    paths:
+      - 'configs/**'
+      - 'workflows/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'configs/**'
+      - 'workflows/**'
+  workflow_dispatch:
+
+jobs:
+  validate-json:
+    name: Validate JSON Files
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate pairs.json
+        run: |
+          if [ -f configs/pairs.json ]; then
+            python3 -m json.tool configs/pairs.json > /dev/null && echo "✅ pairs.json is valid JSON"
+          else
+            echo "⚠️ configs/pairs.json not found"
+          fi
+      
+      - name: Validate workflow JSON files
+        run: |
+          for file in workflows/*.json; do
+            if [ -f "$file" ]; then
+              python3 -m json.tool "$file" > /dev/null && echo "✅ $file is valid JSON"
+            fi
+          done
+      
+      - name: Check pairs.json structure
+        run: |
+          if [ -f configs/pairs.json ]; then
+            python3 << 'EOF'
+            import json
+            import sys
+            
+            with open('configs/pairs.json', 'r') as f:
+                data = json.load(f)
+            
+            # Проверка обязательных полей
+            required_fields = ['enabled', 'pairs']
+            for field in required_fields:
+                if field not in data:
+                    print(f"❌ Missing required field: {field}")
+                    sys.exit(1)
+            
+            # Проверка структуры пар
+            for i, pair in enumerate(data['pairs']):
+                required_pair_fields = ['symbol', 'enabled', 'risk']
+                for field in required_pair_fields:
+                    if field not in pair:
+                        print(f"❌ Pair {i} missing required field: {field}")
+                        sys.exit(1)
+                
+                # Проверка вложенных полей risk
+                risk_fields = ['position_size_usdt', 'stop_loss_pct', 'take_profit_pct']
+                for field in risk_fields:
+                    if field not in pair['risk']:
+                        print(f"❌ Pair {i} risk missing required field: {field}")
+                        sys.exit(1)
+            
+            print("✅ pairs.json structure is valid")
+            print(f"   Total pairs: {len(data['pairs'])}")
+            print(f"   Enabled pairs: {sum(1 for p in data['pairs'] if p['enabled'])}")
+            EOF
+          fi
+
+  validate-workflow-structure:
+    name: Validate n8n Workflow Structure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check workflow JSON structure
+        run: |
+          for file in workflows/*.json; do
+            if [ -f "$file" ]; then
+              python3 << EOF
+import json
+import sys
+
+with open('$file', 'r') as f:
+    data = json.load(f)
+
+required_fields = ['name', 'nodes', 'connections']
+for field in required_fields:
+    if field not in data:
+        print(f"❌ $file missing required field: {field}")
+        sys.exit(1)
+
+print(f"✅ $file structure is valid")
+print(f"   Workflow name: {data['name']}")
+print(f"   Total nodes: {len(data['nodes'])}")
+print(f"   Active: {data.get('active', False)}")
+EOF
+            fi
+          done
+
+  check-security:
+    name: Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check for exposed secrets
+        run: |
+          echo "🔍 Scanning for potential secrets..."
+          
+          # Проверка на наличие API ключей в конфигах
+          if grep -r "sk-[a-zA-Z0-9]\{20,\}" configs/ 2>/dev/null; then
+            echo "❌ Found potential OpenAI API key in configs!"
+            exit 1
+          fi
+          
+          if grep -r "Bearer [a-zA-Z0-9]\{20,\}" configs/ 2>/dev/null; then
+            echo "❌ Found potential Bearer token in configs!"
+            exit 1
+          fi
+          
+          # Проверка на наличие паролей в .env примерах
+          if grep -r "password.*=.*admin" . 2>/dev/null; then
+            echo "⚠️ Found weak password pattern (admin)"
+          fi
+          
+          echo "✅ No obvious secrets found"
+      
+      - name: Check file permissions
+        run: |
+          echo "🔍 Checking file permissions..."
+          
+          # Проверка .gitignore
+          if grep -q "pairs.json" .gitignore; then
+            echo "⚠️ pairs.json in .gitignore - good for production"
+          else
+            echo "ℹ️ Consider adding pairs.json to .gitignore if it contains secrets"
+          fi
+          
+          echo "✅ File permissions check complete"
